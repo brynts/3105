@@ -13,18 +13,35 @@ struct AppDataBrowserView: View {
     @State private var errorMessage: String?
     @State private var hasLoaded = false
     @State private var workspaceURL: URL?
+    @State private var selectedCategory: AppCategory = .thirdParty
     @Binding private var tabSession: FilesTabSession
 
     init(tabSession: Binding<FilesTabSession>) {
         _tabSession = tabSession
     }
 
+    private var categoryApps: [InstalledApp] {
+        apps.filter { app in
+            switch selectedCategory {
+            case .thirdParty:
+                return !Self.isSystemApp(app.bundleID)
+            case .system:
+                return Self.isSystemApp(app.bundleID)
+            }
+        }
+    }
+
     private var filteredApps: [InstalledApp] {
-        guard !searchText.isEmpty else { return apps }
+        let base = categoryApps
+        guard !searchText.isEmpty else { return base }
         let q = searchText.lowercased()
-        return apps.filter {
+        return base.filter {
             $0.name.lowercased().contains(q) || $0.bundleID.lowercased().contains(q)
         }
+    }
+
+    private static func isSystemApp(_ bundleID: String) -> Bool {
+        bundleID.hasPrefix("com.apple.")
     }
 
     private var overlayState: AppBrowserOverlayState {
@@ -102,6 +119,13 @@ struct AppDataBrowserView: View {
             if horizontalSizeClass == .regular {
                 FilesTabStrip(session: $tabSession)
             }
+            Picker("", selection: $selectedCategory) {
+                Text("Third-party").tag(AppCategory.thirdParty)
+                Text("Apple / System").tag(AppCategory.system)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
             AppSearchField(
                 text: $searchText,
                 prompt: language.text("browser.search"),
@@ -373,6 +397,13 @@ struct AppDataBrowserView: View {
             }
         }
     }
+}
+
+private enum AppCategory: String, CaseIterable, Identifiable {
+    case thirdParty
+    case system
+
+    var id: String { rawValue }
 }
 
 private enum AppBrowserOverlayState: Equatable {

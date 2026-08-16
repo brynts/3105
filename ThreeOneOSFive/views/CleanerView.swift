@@ -13,17 +13,29 @@ struct CleanerView: View {
     @State private var hasLoaded = false
     @State private var scanID = UUID()
     @State private var activeAlert: CleanerAlert?
+    @State private var selectedCategory: CleanerAppCategory = .thirdParty
+
+    private var categoryRecords: [CleanerAppRecord] {
+        records.filter { record in
+            switch selectedCategory {
+            case .thirdParty:
+                return !Self.isSystemApp(record.app.bundleID)
+            case .system:
+                return Self.isSystemApp(record.app.bundleID)
+            }
+        }
+    }
 
     private var filteredRecords: [CleanerAppRecord] {
         let matchingRecords: [CleanerAppRecord]
         if searchText.isEmpty {
-            matchingRecords = records
+            matchingRecords = categoryRecords
         } else {
             let query = searchText.folding(
                 options: [.caseInsensitive, .diacriticInsensitive],
                 locale: language.locale
             )
-            matchingRecords = records.filter {
+            matchingRecords = categoryRecords.filter {
                 $0.app.displayName.folding(
                     options: [.caseInsensitive, .diacriticInsensitive],
                     locale: language.locale
@@ -40,6 +52,10 @@ struct CleanerView: View {
         )
     }
 
+    private static func isSystemApp(_ bundleID: String) -> Bool {
+        bundleID.hasPrefix("com.apple.")
+    }
+
     private var visibleBundleIDs: [String] {
         filteredRecords.map(\.id)
     }
@@ -49,11 +65,11 @@ struct CleanerView: View {
     }
 
     private var totalAvailableBytes: Int64 {
-        records.reduce(0) { $0 + $1.usage.totalBytes }
+        categoryRecords.reduce(0) { $0 + $1.usage.totalBytes }
     }
 
     private var selectedBytes: Int64 {
-        records.reduce(0) { result, record in
+        categoryRecords.reduce(0) { result, record in
             result + (selectedBundleIDs.contains(record.id) ? record.usage.totalBytes : 0)
         }
     }
@@ -65,6 +81,13 @@ struct CleanerView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
+                Picker("", selection: $selectedCategory) {
+                    Text("Third-party").tag(CleanerAppCategory.thirdParty)
+                    Text("Apple / System").tag(CleanerAppCategory.system)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
                 AppSearchField(
                     text: $searchText,
                     prompt: language.text("cleaner.search"),
@@ -613,6 +636,13 @@ struct CleanerView: View {
     private func sizeText(_ byteCount: Int64) -> String {
         ByteCountFormatter.string(fromByteCount: byteCount, countStyle: .file)
     }
+}
+
+private enum CleanerAppCategory: String, CaseIterable, Identifiable {
+    case thirdParty
+    case system
+
+    var id: String { rawValue }
 }
 
 private struct CleanerAppRecord: Identifiable {
