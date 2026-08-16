@@ -1,9 +1,9 @@
 name: Build IPA
 
 on:
-  push:
-    branches: [build]
   workflow_dispatch:
+  push:
+    branches: [build, main]
 
 permissions:
   contents: write
@@ -79,7 +79,7 @@ jobs:
           draft: true
           files: build/3105.ipa
           body: |
-            Unsigned IPA from branch `build`.
+            Unsigned IPA from `${{ github.ref_name }}`.
             Sign with enterprise certificate before installing.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
