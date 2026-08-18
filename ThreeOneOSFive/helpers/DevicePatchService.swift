@@ -51,16 +51,21 @@ enum DevicePatchService {
 
         for bundleID in bundleIDs {
             guard let path = ContainerStore.resolveAppContainerPath(bundleID: bundleID),
-                  ContainerStore.isApplicationContainerPath(path) else {
+                  ContainerStore.isPatchableContainerPath(path) else {
+                log("patch: container unavailable for \(bundleID)")
                 throw PatchPackageError.targetAppUnavailable(bundleID)
             }
-            let handle = ContainerStore.grantContainerAccess(path)
+            let handle = ContainerStore.grantContainerAccess(
+                path,
+                groupIdentifier: ContainerStore.isAppGroupIdentifier(bundleID) ? bundleID : nil
+            )
             guard handle >= 0 else {
                 log("patch: traversal grant failed for \(bundleID), result=\(handle)")
                 throw PatchPackageError.targetAppUnavailable(bundleID)
             }
             handles.append(handle)
             roots[bundleID] = PatchPathValidator.canonicalFileURL(URL(fileURLWithPath: path, isDirectory: true))
+            log("patch: resolved \(bundleID) -> \(path)")
         }
         return try operation(roots)
     }
