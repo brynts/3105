@@ -199,6 +199,7 @@ enum PatchPackageLimits {
 
 enum PatchPathValidator {
     private static let applicationRoot = "/private/var/mobile/Containers/Data/Application"
+    private static let appGroupRoot = "/private/var/mobile/Containers/Shared/AppGroup"
 
     static func canonicalBundleIdentifier(_ rawValue: String) throws -> String {
         let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -263,7 +264,10 @@ enum PatchPathValidator {
         let path = try canonicalRelativePath(relativePath)
         let root = canonicalFileURL(containerRoot)
 
-        guard root.deletingLastPathComponent().path == applicationRoot,
+        let parent = root.deletingLastPathComponent().path
+        let isAppData = parent == applicationRoot
+        let isAppGroup = parent == appGroupRoot
+        guard (isAppData || isAppGroup),
               UUID(uuidString: root.lastPathComponent) != nil
         else {
             throw PatchPackageError.unsafeTargetPath
