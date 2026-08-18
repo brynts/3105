@@ -37,7 +37,10 @@ struct FileEntry: Identifiable, Hashable {
 
 enum ContainerStore {
     static let appDataRoot = "/var/mobile/Containers/Data/Application"
+    static let appGroupRoot = "/var/mobile/Containers/Shared/AppGroup"
     static let systemDataRoot = "/var/mobile/Containers/Data/System"
+    /// FilzaSlop MHA-C7 uses MCM class 7 for app-group lookup.
+    private static let appGroupMCMClass: UInt64 = 7
     private static let applicationBundleRoots: [(path: String, nested: Bool)] = [
         ("/var/containers/Bundle/Application", true),
         ("/Applications", false),
@@ -62,6 +65,9 @@ enum ContainerStore {
         guard (try? PatchPathValidator.canonicalBundleIdentifier(bundleID)) == bundleID else {
             return nil
         }
+        if isAppGroupIdentifier(bundleID) {
+            return resolveAppGroupContainerPath(groupID: bundleID)
+        }
         var lookupError: NSString?
         guard let path = MCMActivateContainerPath(2, bundleID, false, &lookupError),
               isApplicationContainerPath(path) else {
@@ -71,6 +77,40 @@ enum ContainerStore {
         }
         log("patch: MHA-C2 resolved \(bundleID)")
         return path
+    }
+
+    static func isAppGroupIdentifier(_ identifier: String) -> Bool {
+        identifier.hasPrefix("group.")
+    }
+
+    /// Resolve a shared App Group container (e.g. group.woodsign.widgy).
+    /// Tries MCM class 7 + group=true first (MHA-C7), then a few fallbacks.
+    static func resolveAppGroupContainerPath(groupID: String) -> String? {
+        guard (try? PatchPathValidator.canonicalBundleIdentifier(groupID)) == groupID,
+              isAppGroupIdentifier(groupID) else {
+            return nil
+        }
+
+        let attempts: [(UInt64, Bool)] = [
+            (appGroupMCMClass, true),
+            (appGroupMCMClass, false),
+            (2, true),
+            (1, true)
+        ]
+        for (cls, asGroup) in attempts {
+            var lookupError: NSString?
+            guard let path = MCMActivateContainerPath(cls, groupID, asGroup, &lookupError) else {
+                let detail = lookupError.map(String.init) ?? "unavailable"
+                log("patch: MHA-C\(cls) group=\(asGroup) could not resolve \(groupID), detail=\(detail)")
+                continue
+            }
+            if isAppGroupContainerPath(path) {
+                log("patch: MHA-C\(cls) group=\(asGroup) resolved \(groupID) -> \(path)")
+                return path
+            }
+            log("patch: MHA-C\(cls) group=\(asGroup) path rejected for \(groupID) -> \(path)")
+        }
+        return nil
     }
 
     // MARK: Primary — MobileInstallation / LSApplicationWorkspace
@@ -302,8 +342,6 @@ enum ContainerStore {
             addCachePath((directory as NSString).appendingPathComponent("Library/Caches"))
         }
 
-        // Older and Simulator layouts keep the same store outside the MCM
-        // service-container layout. They are harmless fallbacks on device.
         addCachePath("/var/db/lsd")
         addCachePath("/var/mobile/Library/Caches")
 
@@ -355,6 +393,17 @@ enum ContainerStore {
         let canonicalPath = ContainerDiscoveryMerger.canonicalPath(path)
         guard canonicalPath.hasPrefix(canonicalRoot + "/") else { return false }
         return UUID(uuidString: (canonicalPath as NSString).lastPathComponent) != nil
+    }
+
+    static func isAppGroupContainerPath(_ path: String) -> Bool {
+        let canonicalRoot = ContainerDiscoveryMerger.canonicalPath(appGroupRoot)
+        let canonicalPath = ContainerDiscoveryMerger.canonicalPath(path)
+        guard canonicalPath.hasPrefix(canonicalRoot + "/") else { return false }
+        return UUID(uuidString: (canonicalPath as NSString).lastPathComponent) != nil
+    }
+
+    static func isPatchableContainerPath(_ path: String) -> Bool {
+        isApplicationContainerPath(path) || isAppGroupContainerPath(path)
     }
 
     // MARK: Filesystem discovery
@@ -423,8 +472,22 @@ enum ContainerStore {
     }
 
     static func grantContainerAccess(_ containerPath: String) -> Int64 {
+        grantContainerAccess(containerPath, groupIdentifier: nil)
+    }
+
+    static func grantContainerAccess(_ containerPath: String, groupIdentifier: String?) -> Int64 {
         let clean = containerPath.hasSuffix("/") ? String(containerPath.dropLast()) : containerPath
         var pathC = clean.utf8CString.map { Int8($0) }
+        let isGroup = groupIdentifier.map { isAppGroupIdentifier($0) } ?? isAppGroupContainerPath(clean)
+        if isGroup {
+            let groupID = groupIdentifier ?? ""
+            var groupC = groupID.utf8CString.map { Int8($0) }
+            let handle = groupID.isEmpty
+                ? bad_query(&pathC, true, nil, true)
+                : bad_query(&pathC, true, &groupC, true)
+            log("patch: bad_query group grant path=\(clean) group=\(groupID.isEmpty ? "?" : groupID) -> \(handle)")
+            return handle
+        }
         return bad_query(&pathC, true, nil, false)
     }
 
